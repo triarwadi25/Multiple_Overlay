@@ -1,0 +1,11 @@
+[general]
+name=Multiple Overlay Tools
+qgisMinimumVersion=3.44
+description=Multiple polygon Intersection, Union and Clip tools.
+version=1.0.0
+author=Moh. Tri Arwadi
+about=Multiple Intersection, Union and Clip is a QGIS plugin designed to simplify and accelerate vector overlay analysis involving multiple layers. The plugin allows users to perform Intersection, Union, and Clip operations on multiple vector layers in a single workflow, reducing the need to process each layer manually.
+category=Vector
+hasProcessingProvider=yes
+experimental=False
+deprecated=False
