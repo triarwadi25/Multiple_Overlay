@@ -143,8 +143,7 @@ class BaseOverlay(QgsProcessingAlgorithm):
                 raise QgsProcessingException(
                     "Input harus berupa vector layer."
                 )
-
-            if layer.geometryType() != Qgis.GeometryType.Polygon:
+            if layer.geometryType() != Qgis.GeometryType.PolygonGeometry:
                 raise QgsProcessingException(
                     f"Layer '{layer.name()}' bukan polygon."
                 )
@@ -208,7 +207,7 @@ class IntersectionMultiple(BaseOverlay):
             QgsProcessingParameterMultipleLayers(
                 "LAYERS",
                 "Input Polygon Layers",
-                layerType=QgsProcessing.SourceType.TypeVectorPolygon
+                layerType=QgsProcessing.TypeVectorPolygon
             )
         )
 
@@ -216,7 +215,7 @@ class IntersectionMultiple(BaseOverlay):
             QgsProcessingParameterFeatureSink(
                 "OUTPUT",
                 "Output Intersection",
-                type=QgsProcessing.SourceType.TypeVectorPolygon,
+                type=QgsProcessing.TypeVectorPolygon,
                 createByDefault=True,
                 defaultValue="TEMPORARY_OUTPUT"
             )
@@ -275,7 +274,7 @@ class UnionMultiple(BaseOverlay):
             QgsProcessingParameterMultipleLayers(
                 "LAYERS",
                 "Input Polygon Layers",
-                layerType=QgsProcessing.SourceType.TypeVectorPolygon,
+                layerType=QgsProcessing.TypeVectorPolygon,
             )
         )
 
@@ -283,7 +282,7 @@ class UnionMultiple(BaseOverlay):
             QgsProcessingParameterFeatureSink(
                 "OUTPUT",
                 "Output Union",
-                type=QgsProcessing.SourceType.TypeVectorPolygon,
+                type=QgsProcessing.TypeVectorPolygon,
                 createByDefault=True,
                 defaultValue="TEMPORARY_OUTPUT"
             )
@@ -342,7 +341,7 @@ class ClipMultiple(QgsProcessingAlgorithm):
             QgsProcessingParameterMultipleLayers(
                 "LAYERS",
                 "Input Layers",
-                layerType=QgsProcessing.SourceType.TypeVectorAnyGeometry
+                layerType=QgsProcessing.TypeVectorAnyGeometry
             )
         )
 
@@ -350,7 +349,7 @@ class ClipMultiple(QgsProcessingAlgorithm):
             QgsProcessingParameterVectorLayer(
                 "CLIP",
                 "Clip Layer",
-                types=[QgsProcessing.SourceType.TypeVectorPolygon]
+                types=[QgsProcessing.TypeVectorPolygon]
             )
         )
 
@@ -377,7 +376,7 @@ class ClipMultiple(QgsProcessingAlgorithm):
                 "Clip Layer tidak valid."
             )
 
-        if clip.geometryType() != Qgis.GeometryType.Polygon:
+        if clip.geometryType() != Qgis.GeometryType.PolygonGeometry:
             raise QgsProcessingException(
                 "Clip Layer harus berupa polygon."
             )
