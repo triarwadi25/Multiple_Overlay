@@ -3,6 +3,7 @@ import os
 from qgis.PyQt.QtGui import QIcon
 
 from qgis.core import (
+    Qgis,
     QgsProcessingProvider,
     QgsProcessingAlgorithm,
     QgsProcessingParameterMultipleLayers,
