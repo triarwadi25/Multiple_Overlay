@@ -1,13 +1,22 @@
-Multiple Overlay Tools for QGIS
+# Multiple Overlay Tools (QGIS 3.18+)
 
-Multiple Overlay Tools is a QGIS plugin designed to simplify spatial overlay analysis by allowing users to perform multiple Intersection, Union, and Clip operations in a single workflow.
+Overlay many layers in one step: **Intersection**, **Union**, **Erase** and **Clip**.
 
-The plugin is useful for GIS users who need to process multiple vector layers efficiently without repeatedly running individual geoprocessing tools.
+* Menu: *Vector > Overlay Multiple* (dialog with per-layer *selected only*, *prefix*, *fields*).
+* Processing Toolbox: *Multiple Overlay Tools*. Per-layer settings can be passed as JSON in the advanced `CONFIG` parameter:
 
-Features
-Multiple Intersection – performs intersection analysis between multiple vector layers.
-Multiple Union – combines multiple vector layers using union operations.
-Multiple Clip – clips multiple vector layers using a selected overlay layer.
-Simple and user-friendly interface.
-Reduces repetitive geoprocessing tasks.
-Supports common vector data formats supported by QGIS.
+```json
+[{"selected_only": true, "prefix": "a_", "fields": ["id", "name"]},
+ {"prefix": "b_"}]
+```
+
+One entry per input layer, same order as `LAYERS`. `fields: null` keeps all fields.
+
+| Tool | Layers | Notes |
+|------|--------|-------|
+| Intersection Multiple | points / lines / polygons, mixed | result has the lowest geometry dimension |
+| Union Multiple | all points, or all lines, or all polygons | QGIS union needs identical types |
+| Erase Multiple | 1st: any; others: polygons | difference repeated per erase layer |
+| Clip Multiple | any, clipped by one polygon layer | temporary layers or output folder |
+
+Add a LICENSE file of your choice (QGIS plugins are normally GPL-2.0-or-later compatible).
