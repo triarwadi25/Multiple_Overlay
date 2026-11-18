@@ -21,7 +21,7 @@ from qgis.core import (
 )
 from processing.gui.wrappers import WidgetWrapper
 
-from .engine import geometry_kind
+from .engine import geometry_kind, log_problem
 from .widgets import LayerSettingsDialog, run_dialog
 
 
@@ -29,7 +29,8 @@ def _resolve_layer(item):
     if isinstance(item, QgsProcessingFeatureSourceDefinition):
         try:
             item = item.source.staticValue()
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            log_problem("Could not read layer source: {}".format(exc))
             return None
     if isinstance(item, QgsMapLayer):
         return item
@@ -73,7 +74,8 @@ class SettingsWrapper(WidgetWrapper):
             layout.addWidget(self._button)
             self._refresh_summary()
             return holder
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            log_problem("Using plain text for CONFIG: {}".format(exc))
             self._plain = QLineEdit()
             self._plain.setPlaceholderText(
                 'optional JSON, e.g. {"Layer name": {"prefix": "a_"}}')
@@ -116,19 +118,26 @@ class SettingsWrapper(WidgetWrapper):
             self._summary.setText("Default (all fields, no prefix)")
 
     def _wrapper_name(self, wrapper):
+        definition = getattr(wrapper, "parameterDefinition", None)
+        if callable(definition):
+            return definition().name()
+        return wrapper.param.name()
+
+    def _layer_values(self, wrapper):
+        """Raw value of a layer parameter, or None if unavailable."""
         try:
-            return wrapper.parameterDefinition().name()
-        except Exception:  # noqa: BLE001
-            return wrapper.param.name()
+            if self._wrapper_name(wrapper) not in self.LAYER_PARAMS:
+                return None
+            return wrapper.parameterValue()
+        except Exception as exc:  # noqa: BLE001
+            log_problem("Could not read a parameter value: {}".format(exc))
+            return None
 
     def _current_layers(self):
         found = []
         for wrapper in self._wrappers:
-            try:
-                if self._wrapper_name(wrapper) not in self.LAYER_PARAMS:
-                    continue
-                value = wrapper.parameterValue()
-            except Exception:  # noqa: BLE001
+            value = self._layer_values(wrapper)
+            if value is None:
                 continue
             items = value if isinstance(value, (list, tuple)) else [value]
             for item in items:

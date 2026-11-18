@@ -28,6 +28,7 @@ from .engine import (
     as_layer,
     fix_geometries,
     geometry_kind,
+    log_problem,
     parse_config,
     prepare_layer,
     prepare_overlay,
@@ -60,8 +61,8 @@ def attach_wrapper(parameter, wrapper_name):
         from . import wrapper
         parameter.setMetadata(
             {"widget_wrapper": {"class": getattr(wrapper, wrapper_name)}})
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as exc:  # noqa: BLE001
+        log_problem("Configure widget not available: {}".format(exc))
 
 
 class BaseOverlay(QgsProcessingAlgorithm):
@@ -317,8 +318,8 @@ class UnionMultiple(BaseOverlay):
             raise QgsProcessingException(
                 "Union needs layers of the same geometry type; got: {}."
                 .format(", ".join(
-                    "{} ({})".format(l.name(), KIND_NAMES[k])
-                    for l, k in zip(layers, kinds))))
+                    "{} ({})".format(layer.name(), KIND_NAMES[kind])
+                    for layer, kind in zip(layers, kinds))))
 
     def initAlgorithm(self, config=None):
         self.addParameter(

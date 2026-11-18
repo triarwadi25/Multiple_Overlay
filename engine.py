@@ -15,10 +15,12 @@ Design notes
 import json
 
 from qgis.core import (
+    Qgis,
     QgsFeature,
     QgsFeatureRequest,
     QgsField,
     QgsMapLayer,
+    QgsMessageLog,
     QgsProcessingException,
     QgsProcessingFeatureSourceDefinition,
     QgsProcessingUtils,
@@ -27,7 +29,13 @@ from qgis.core import (
 )
 from qgis import processing
 
+LOG_TAG = "Multiple Overlay Tools"
 BATCH_SIZE = 2000
+
+
+def log_problem(text):
+    """Write a non-fatal problem to the QGIS log panel."""
+    QgsMessageLog.logMessage(str(text), LOG_TAG, Qgis.Warning)
 KIND_NAMES = {0: "point", 1: "line", 2: "polygon"}
 
 
