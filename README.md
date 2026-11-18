@@ -2,21 +2,22 @@
 
 Overlay many layers in one step: **Intersection**, **Union**, **Erase** and **Clip**.
 
-* Menu: *Vector > Overlay Multiple* (dialog with per-layer *selected only*, *prefix*, *fields*).
-* Processing Toolbox: *Multiple Overlay Tools*. Per-layer settings can be passed as JSON in the advanced `CONFIG` parameter:
+Open them from *Vector > Overlay Multiple* or the Processing Toolbox. They use the standard Processing dialog: tick the input layers, tick the layers that should use *selected features only*, press **Configure...** for a per-layer field prefix / fields to keep, and choose the output (temporary layer, file, GeoPackage, database, skip).
+
+Scripts and models can pass the per-layer prefix / fields in `CONFIG` as JSON keyed by layer id or name:
 
 ```json
-[{"selected_only": true, "prefix": "a_", "fields": ["id", "name"]},
- {"prefix": "b_"}]
+{"Roads": {"prefix": "r_", "fields": ["id", "name"]},
+ "Parcels": {"prefix": "p_"}}
 ```
 
-One entry per input layer, same order as `LAYERS`. `fields: null` keeps all fields.
+`fields: null` (or missing) keeps all fields.
 
 | Tool | Layers | Notes |
 |------|--------|-------|
 | Intersection Multiple | points / lines / polygons, mixed | result has the lowest geometry dimension |
 | Union Multiple | all points, or all lines, or all polygons | QGIS union needs identical types |
-| Erase Multiple | 1st: any; others: polygons | difference repeated per erase layer |
-| Clip Multiple | any, clipped by one polygon layer | temporary layers or output folder |
+| Erase Multiple | layer to erase from: any; erase layers: polygons | difference repeated per erase layer |
+| Clip Multiple | any, clipped by one polygon layer | one file per layer into the output folder |
 
 Add a LICENSE file of your choice (QGIS plugins are normally GPL-2.0-or-later compatible).

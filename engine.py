@@ -54,10 +54,39 @@ class LayerConfig(object):
         self.fields = fields  # None = keep all fields
 
 
-def parse_config(text, count):
-    """Parse the CONFIG JSON into ``count`` LayerConfig objects."""
+def _entry_to_config(item):
+    if not isinstance(item, dict):
+        raise QgsProcessingException(
+            "Every per-layer setting must be a JSON object.")
+    fields = item.get("fields")
+    if fields is not None:
+        if not isinstance(fields, list):
+            raise QgsProcessingException(
+                "'fields' must be a list of field names or null.")
+        fields = [str(name) for name in fields]
+    return LayerConfig(
+        item.get("selected_only", False),
+        str(item.get("prefix") or ""),
+        fields,
+    )
+
+
+def parse_config(text, layers):
+    """Parse the CONFIG JSON into one LayerConfig per layer.
+
+    Accepted formats
+    * {"<layer id or name>": {"prefix": "a_", "fields": ["id"]}, ...}
+    * [{"layer": "<layer id or name>", "prefix": ...}, ...]
+    * [{"prefix": ...}, {...}]  (positional, one entry per layer)
+
+    Returns (configs, warnings); configs are aligned with ``layers``.
+    """
+    count = len(layers)
+    configs = [LayerConfig() for _ in range(count)]
+    warnings = []
+
     if text is None or not str(text).strip():
-        return [LayerConfig() for _ in range(count)]
+        return configs, warnings
 
     try:
         data = json.loads(text)
@@ -65,31 +94,48 @@ def parse_config(text, count):
         raise QgsProcessingException(
             "Per-layer settings are not valid JSON: {}".format(exc))
 
+    if isinstance(data, dict) and isinstance(data.get("layers"), list):
+        data = data["layers"]
+
+    # Normalise to a list of (key or None, entry) pairs.
     if isinstance(data, dict):
-        data = data.get("layers")
-
-    if not isinstance(data, list) or len(data) != count:
-        raise QgsProcessingException(
-            "Per-layer settings must be a JSON list with exactly one entry "
-            "per input layer ({} expected).".format(count))
-
-    configs = []
-    for item in data:
-        if not isinstance(item, dict):
-            raise QgsProcessingException(
-                "Every per-layer setting must be a JSON object.")
-        fields = item.get("fields")
-        if fields is not None:
-            if not isinstance(fields, list):
+        pairs = [(str(key), value) for key, value in data.items()]
+    elif isinstance(data, list):
+        if data and all(isinstance(i, dict) and "layer" in i for i in data):
+            pairs = [(str(i["layer"]), i) for i in data]
+        else:
+            if len(data) != count:
                 raise QgsProcessingException(
-                    "'fields' must be a list of field names or null.")
-            fields = [str(name) for name in fields]
-        configs.append(LayerConfig(
-            item.get("selected_only", False),
-            str(item.get("prefix") or ""),
-            fields,
-        ))
-    return configs
+                    "Per-layer settings must contain exactly one entry per "
+                    "input layer ({} expected), or name their layer.".format(
+                        count))
+            pairs = [(None, i) for i in data]
+    else:
+        raise QgsProcessingException(
+            "Per-layer settings must be a JSON object or list.")
+
+    for position, (key, entry) in enumerate(pairs):
+        config = _entry_to_config(entry)
+        if key is None:
+            configs[position] = config
+            continue
+        index = None
+        for i, layer in enumerate(layers):
+            if layer.id() == key:
+                index = i
+                break
+        if index is None:
+            for i, layer in enumerate(layers):
+                if layer.name() == key:
+                    index = i
+                    break
+        if index is None:
+            # Settings for a layer that is not an input: ignore quietly
+            # (the settings button lists layers that may be unchecked later).
+            continue
+        configs[index] = config
+
+    return configs, warnings
 
 
 def unique_name(name, used):

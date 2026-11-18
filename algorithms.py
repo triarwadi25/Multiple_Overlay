@@ -12,13 +12,13 @@ from qgis.core import (
     QgsProcessingMultiStepFeedback,
     QgsProcessingOutputMultipleLayers,
     QgsProcessingParameterBoolean,
-    QgsProcessingParameterDefinition,
     QgsProcessingParameterEnum,
     QgsProcessingParameterFeatureSink,
     QgsProcessingParameterFeatureSource,
     QgsProcessingParameterFolderDestination,
     QgsProcessingParameterMultipleLayers,
     QgsProcessingParameterString,
+    QgsProcessingParameterVectorLayer,
     QgsProject,
     QgsVectorLayer,
 )
@@ -38,13 +38,30 @@ from .engine import (
 ICON_DIR = os.path.join(os.path.dirname(__file__), "icons")
 
 CONFIG_HELP = (
-    "<p><b>Per-layer settings (advanced)</b>: a JSON list with one entry per "
-    "input layer, in the same order as the input layers, for example:<br>"
-    "<code>[{\"selected_only\": true, \"prefix\": \"a_\", \"fields\": "
-    "[\"id\", \"name\"]}, {\"prefix\": \"b_\"}]</code><br>"
-    "<code>fields</code> = null or missing keeps every field. The menu "
-    "dialog (Vector &gt; Overlay Multiple) builds this for you.</p>"
+    "<p><b>Field prefix / fields to keep</b>: use the <i>Configure...</i> "
+    "button to choose, per layer, a field-name prefix and the fields to "
+    "keep. Scripts and models can pass the same settings as JSON, keyed by "
+    "layer id or name:<br>"
+    "<code>{\"Roads\": {\"prefix\": \"r_\", \"fields\": [\"id\", "
+    "\"name\"]}, \"Parcels\": {\"prefix\": \"p_\"}}</code><br>"
+    "<code>fields</code> = null or missing keeps every field. Field names "
+    "are always made unique.</p>"
+    "<p><b>Selected features only</b>: check the layers that must use only "
+    "their selected features in <i>Use selected features only</i>.</p>"
 )
+
+
+def attach_wrapper(parameter, wrapper_name):
+    """Use the 'Configure...' widget in the Processing dialog if possible.
+
+    Any problem simply leaves a plain text parameter (the JSON still works).
+    """
+    try:
+        from . import wrapper
+        parameter.setMetadata(
+            {"widget_wrapper": {"class": getattr(wrapper, wrapper_name)}})
+    except Exception:  # noqa: BLE001
+        pass
 
 
 class BaseOverlay(QgsProcessingAlgorithm):
@@ -52,6 +69,7 @@ class BaseOverlay(QgsProcessingAlgorithm):
 
     MIN_LAYERS = 2
     ICON = "overlay_multiple.svg"
+    WRAPPER = "IntersectionSettingsWrapper"
 
     # ---- metadata ---------------------------------------------------
     def icon(self):
@@ -70,15 +88,31 @@ class BaseOverlay(QgsProcessingAlgorithm):
     def tags(self):
         return ["overlay", "multiple", "batch", "vector"]
 
+    def createInstance(self):
+        return self.__class__()
+
     # ---- parameters -------------------------------------------------
-    def add_common_parameters(self, layers_label):
+    def add_selected_only_parameter(self):
         self.addParameter(
             QgsProcessingParameterMultipleLayers(
-                "LAYERS",
-                layers_label,
+                "SELECTED_ONLY_LAYERS",
+                "Use selected features only (check the layers)",
                 layerType=QgsProcessing.TypeVectorAnyGeometry,
+                optional=True,
             )
         )
+
+    def add_config_parameter(self):
+        config = QgsProcessingParameterString(
+            "CONFIG",
+            "Field prefix / fields to keep (per layer)",
+            optional=True,
+            multiLine=True,
+        )
+        attach_wrapper(config, self.WRAPPER)
+        self.addParameter(config)
+
+    def add_fix_parameter(self):
         self.addParameter(
             QgsProcessingParameterBoolean(
                 "FIX_GEOMETRIES",
@@ -86,23 +120,30 @@ class BaseOverlay(QgsProcessingAlgorithm):
                 defaultValue=True,
             )
         )
-        config = QgsProcessingParameterString(
-            "CONFIG",
-            "Per-layer settings (JSON)",
-            optional=True,
-            multiLine=True,
+
+    def add_output_parameter(self, description):
+        # Optional so the standard "[Skip output]" choice is offered next to
+        # "Create temporary layer" and "Save to file...".
+        self.addParameter(
+            QgsProcessingParameterFeatureSink(
+                "OUTPUT",
+                description,
+                type=QgsProcessing.TypeVectorAnyGeometry,
+                optional=True,
+                createByDefault=True,
+            )
         )
-        config.setFlags(
-            config.flags() | QgsProcessingParameterDefinition.FlagAdvanced)
-        self.addParameter(config)
 
     # ---- input handling ---------------------------------------------
+    def get_layers(self, parameters, context):
+        return self.parameterAsLayerList(parameters, "LAYERS", context)
+
     def load_inputs(self, parameters, context):
-        layers = self.parameterAsLayerList(parameters, "LAYERS", context)
+        layers = self.get_layers(parameters, context)
 
         if len(layers) < self.MIN_LAYERS:
             raise QgsProcessingException(
-                "Select at least {} layers.".format(self.MIN_LAYERS))
+                "Select at least {} layer(s).".format(self.MIN_LAYERS))
 
         kinds = []
         for layer in layers:
@@ -115,34 +156,58 @@ class BaseOverlay(QgsProcessingAlgorithm):
                     "Layer '{}' has no geometry.".format(layer.name()))
             kinds.append(kind)
 
-        configs = parse_config(
-            self.parameterAsString(parameters, "CONFIG", context),
-            len(layers),
-        )
-        return layers, kinds, configs
+        text = ""
+        if self.parameterDefinition("CONFIG") is not None:
+            text = self.parameterAsString(parameters, "CONFIG", context)
+        configs, warnings = parse_config(text, layers)
 
-    def validate(self, layers, kinds, configs):
+        selected = self.parameterAsLayerList(
+            parameters, "SELECTED_ONLY_LAYERS", context)
+        selected_ids = set(layer.id() for layer in selected)
+        input_ids = set(layer.id() for layer in layers)
+        for layer, config in zip(layers, configs):
+            if layer.id() in selected_ids:
+                config.selected_only = True
+        for layer in selected:
+            if layer.id() not in input_ids:
+                warnings.append(
+                    "'{}' is checked for 'selected features only' but is not "
+                    "an input layer; ignored.".format(layer.name()))
+
+        return layers, kinds, configs, warnings
+
+    def validate(self, layers, kinds):
         """Algorithm specific checks; raise QgsProcessingException."""
 
     def checkParameterValues(self, parameters, context):
         try:
-            layers, kinds, configs = self.load_inputs(parameters, context)
-            self.validate(layers, kinds, configs)
+            layers, kinds, configs, warnings = self.load_inputs(
+                parameters, context)
+            self.validate(layers, kinds)
         except QgsProcessingException as exc:
             return False, str(exc)
         return True, ""
 
     def fix_enabled(self, parameters, context):
-        return bool(self.parameterAsBool(parameters, "FIX_GEOMETRIES", context))
+        return bool(self.parameterAsBool(
+            parameters, "FIX_GEOMETRIES", context))
 
-    def createInstance(self):
-        return self.__class__()
+    @staticmethod
+    def output_skipped(parameters):
+        value = parameters.get("OUTPUT")
+        return value is None or value == ""
+
+    @staticmethod
+    def push_warnings(feedback, warnings):
+        for text in warnings:
+            feedback.pushWarning(text)
 
 
 # ======================================================== Intersection ===
 
 class IntersectionMultiple(BaseOverlay):
     ICON = "intersection.svg"
+    WRAPPER = "IntersectionSettingsWrapper"
 
     def name(self):
         return "intersection_multiple"
@@ -158,25 +223,31 @@ class IntersectionMultiple(BaseOverlay):
             "dimension (points, then lines, then polygons), so the result "
             "keeps the geometry type of the lowest-dimension layer. Field "
             "order in the output follows this processing order.</p>"
-            "<p>Per layer you can use selected features only, keep only "
-            "chosen fields and add a field-name prefix. Field names are "
-            "always made unique.</p>" + CONFIG_HELP
+            + CONFIG_HELP
         )
 
     def initAlgorithm(self, config=None):
-        self.add_common_parameters("Input layers")
         self.addParameter(
-            QgsProcessingParameterFeatureSink(
-                "OUTPUT",
-                "Output Intersection",
-                type=QgsProcessing.TypeVectorAnyGeometry,
-                createByDefault=True,
+            QgsProcessingParameterMultipleLayers(
+                "LAYERS",
+                "Input layers",
+                layerType=QgsProcessing.TypeVectorAnyGeometry,
             )
         )
+        self.add_selected_only_parameter()
+        self.add_config_parameter()
+        self.add_fix_parameter()
+        self.add_output_parameter("Intersection")
 
     def processAlgorithm(self, parameters, context, feedback):
-        layers, kinds, configs = self.load_inputs(parameters, context)
-        self.validate(layers, kinds, configs)
+        if self.output_skipped(parameters):
+            feedback.pushInfo("Output is skipped; nothing to do.")
+            return {}
+
+        layers, kinds, configs, warnings = self.load_inputs(
+            parameters, context)
+        self.validate(layers, kinds)
+        self.push_warnings(feedback, warnings)
         fix = self.fix_enabled(parameters, context)
 
         count = len(layers)
@@ -226,6 +297,7 @@ class IntersectionMultiple(BaseOverlay):
 
 class UnionMultiple(BaseOverlay):
     ICON = "union.svg"
+    WRAPPER = "UnionSettingsWrapper"
 
     def name(self):
         return "union_multiple"
@@ -237,13 +309,10 @@ class UnionMultiple(BaseOverlay):
         return (
             "<p>Unions two or more vector layers in one run. QGIS' union "
             "needs identical geometry types, so all layers must be points, "
-            "or all lines, or all polygons.</p>"
-            "<p>Per layer you can use selected features only, keep only "
-            "chosen fields and add a field-name prefix. Field names are "
-            "always made unique.</p>" + CONFIG_HELP
+            "or all lines, or all polygons.</p>" + CONFIG_HELP
         )
 
-    def validate(self, layers, kinds, configs):
+    def validate(self, layers, kinds):
         if len(set(kinds)) > 1:
             raise QgsProcessingException(
                 "Union needs layers of the same geometry type; got: {}."
@@ -252,19 +321,27 @@ class UnionMultiple(BaseOverlay):
                     for l, k in zip(layers, kinds))))
 
     def initAlgorithm(self, config=None):
-        self.add_common_parameters("Input layers")
         self.addParameter(
-            QgsProcessingParameterFeatureSink(
-                "OUTPUT",
-                "Output Union",
-                type=QgsProcessing.TypeVectorAnyGeometry,
-                createByDefault=True,
+            QgsProcessingParameterMultipleLayers(
+                "LAYERS",
+                "Input layers",
+                layerType=QgsProcessing.TypeVectorAnyGeometry,
             )
         )
+        self.add_selected_only_parameter()
+        self.add_config_parameter()
+        self.add_fix_parameter()
+        self.add_output_parameter("Union")
 
     def processAlgorithm(self, parameters, context, feedback):
-        layers, kinds, configs = self.load_inputs(parameters, context)
-        self.validate(layers, kinds, configs)
+        if self.output_skipped(parameters):
+            feedback.pushInfo("Output is skipped; nothing to do.")
+            return {}
+
+        layers, kinds, configs, warnings = self.load_inputs(
+            parameters, context)
+        self.validate(layers, kinds)
+        self.push_warnings(feedback, warnings)
         fix = self.fix_enabled(parameters, context)
 
         count = len(layers)
@@ -312,6 +389,7 @@ class UnionMultiple(BaseOverlay):
 
 class EraseMultiple(BaseOverlay):
     ICON = "erase.svg"
+    WRAPPER = "EraseSettingsWrapper"
 
     def name(self):
         return "erase_multiple"
@@ -321,16 +399,29 @@ class EraseMultiple(BaseOverlay):
 
     def shortHelpString(self):
         return (
-            "<p>Removes from the <b>first</b> layer (point, line or polygon) "
-            "the parts that overlap <b>any of the other layers</b>, which "
-            "must be polygons. It is the difference operation repeated for "
-            "every erase layer.</p>"
-            "<p>Field selection and prefix apply to the first layer only; "
-            "'selected features only' can be set for every layer.</p>"
+            "<p>Removes from the <b>layer to erase from</b> (point, line or "
+            "polygon) the parts that overlap <b>any of the erase layers</b>, "
+            "which must be polygons. It is the difference operation repeated "
+            "for every erase layer.</p>"
+            "<p>Prefix and field selection apply to the layer to erase from "
+            "only; 'selected features only' can be checked for any layer.</p>"
             + CONFIG_HELP
         )
 
-    def validate(self, layers, kinds, configs):
+    def get_layers(self, parameters, context):
+        base = self.parameterAsVectorLayer(parameters, "INPUT", context)
+        if base is None:
+            raise QgsProcessingException(
+                "Choose the layer to erase from.")
+        erase = self.parameterAsLayerList(
+            parameters, "ERASE_LAYERS", context)
+        for layer in erase:
+            if layer.id() == base.id():
+                raise QgsProcessingException(
+                    "'{}' cannot be erased with itself.".format(base.name()))
+        return [base] + list(erase)
+
+    def validate(self, layers, kinds):
         for layer, kind in zip(layers[1:], kinds[1:]):
             if kind != 2:
                 raise QgsProcessingException(
@@ -338,26 +429,41 @@ class EraseMultiple(BaseOverlay):
                         layer.name()))
 
     def initAlgorithm(self, config=None):
-        self.add_common_parameters(
-            "Layers (first = layer to erase from, others = erase polygons)")
         self.addParameter(
-            QgsProcessingParameterFeatureSink(
-                "OUTPUT",
-                "Output Erase",
-                type=QgsProcessing.TypeVectorAnyGeometry,
-                createByDefault=True,
+            QgsProcessingParameterVectorLayer(
+                "INPUT",
+                "Layer to erase from",
+                [QgsProcessing.TypeVectorAnyGeometry],
             )
         )
+        self.addParameter(
+            QgsProcessingParameterMultipleLayers(
+                "ERASE_LAYERS",
+                "Erase layers (polygons)",
+                layerType=QgsProcessing.TypeVectorPolygon,
+            )
+        )
+        self.add_selected_only_parameter()
+        self.add_config_parameter()
+        self.add_fix_parameter()
+        self.add_output_parameter("Erase")
 
     def processAlgorithm(self, parameters, context, feedback):
-        layers, kinds, configs = self.load_inputs(parameters, context)
-        self.validate(layers, kinds, configs)
+        if self.output_skipped(parameters):
+            feedback.pushInfo("Output is skipped; nothing to do.")
+            return {}
+
+        layers, kinds, configs, warnings = self.load_inputs(
+            parameters, context)
+        self.validate(layers, kinds)
+        self.push_warnings(feedback, warnings)
         fix = self.fix_enabled(parameters, context)
 
         count = len(layers)
         steps = QgsProcessingMultiStepFeedback(2 * count - 1, feedback)
 
-        feedback.pushInfo("Preparing base layer: {}".format(layers[0].name()))
+        feedback.pushInfo("Preparing layer to erase from: {}".format(
+            layers[0].name()))
         steps.setCurrentStep(0)
         current = prepare_layer(
             layers[0], configs[0], set(), context, steps, fix)
@@ -419,17 +525,24 @@ class ClipMultiple(BaseOverlay):
     def shortHelpString(self):
         return (
             "<p>Clips several layers (points, lines or polygons) with one "
-            "polygon layer.</p>"
-            "<p>Leave the output folder empty to get temporary layers added "
-            "to the project; otherwise one file per layer is written to the "
-            "folder (existing files with the same name are overwritten)."
-            "</p><p>'Selected features only' can be set per input layer; "
-            "use the checkbox of the clip layer parameter for the clip "
-            "layer.</p>" + CONFIG_HELP
+            "polygon layer. One output file is written per input layer into "
+            "the output folder (choose a temporary folder or a directory; "
+            "existing files with the same name are overwritten) and the "
+            "results are added to the project.</p>"
+            "<p><b>Selected features only</b>: check the layers that must "
+            "use only their selected features; use the checkbox of the clip "
+            "layer parameter for the clip layer.</p>"
         )
 
     def initAlgorithm(self, config=None):
-        self.add_common_parameters("Input layers")
+        self.addParameter(
+            QgsProcessingParameterMultipleLayers(
+                "LAYERS",
+                "Input layers",
+                layerType=QgsProcessing.TypeVectorAnyGeometry,
+            )
+        )
+        self.add_selected_only_parameter()
         self.addParameter(
             QgsProcessingParameterFeatureSource(
                 "CLIP",
@@ -437,10 +550,11 @@ class ClipMultiple(BaseOverlay):
                 [QgsProcessing.TypeVectorPolygon],
             )
         )
+        self.add_fix_parameter()
         self.addParameter(
             QgsProcessingParameterEnum(
                 "OUTPUT_FORMAT",
-                "Output format (when writing to a folder)",
+                "Output format",
                 options=[label for label, _ in self.FORMATS],
                 defaultValue=0,
             )
@@ -448,19 +562,16 @@ class ClipMultiple(BaseOverlay):
         self.addParameter(
             QgsProcessingParameterFolderDestination(
                 "OUTPUT_FOLDER",
-                "Output folder (empty = temporary layers)",
-                optional=True,
-                createByDefault=False,
+                "Output folder",
             )
         )
         self.addOutput(
             QgsProcessingOutputMultipleLayers("OUTPUTS", "Clipped layers"))
 
-    def validate(self, layers, kinds, configs):
-        pass
-
     def processAlgorithm(self, parameters, context, feedback):
-        layers, kinds, configs = self.load_inputs(parameters, context)
+        layers, kinds, configs, warnings = self.load_inputs(
+            parameters, context)
+        self.push_warnings(feedback, warnings)
         fix = self.fix_enabled(parameters, context)
 
         clip_layer = self.parameterAsVectorLayer(parameters, "CLIP", context)

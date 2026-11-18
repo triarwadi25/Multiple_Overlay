@@ -1,11 +1,11 @@
 [general]
 name=Multiple Overlay Tools
 qgisMinimumVersion=3.18
-description=Multiple Intersection, Union, Erase and Clip for points, lines and polygons, with per-layer field selection, prefix and selected-features-only.
+description=Multiple Intersection, Union, Erase and Clip for points, lines and polygons, with per-layer field selection, prefix and selected-features-only (standard Processing dialogs).
 version=1.1.0
 author=Moh. Tri Arwadi
 email=triarwadi25@gmail.com
-about=Multiple Overlay Tools runs vector overlay operations on many layers in a single step. Intersection Multiple (points, lines, polygons), Union Multiple (same geometry type), Erase Multiple (one layer erased by several polygon layers) and Clip Multiple (many layers clipped by one polygon). For every input layer you can use selected features only, keep only chosen fields and add a field-name prefix. Invalid geometries can be fixed automatically. Works from the Vector menu (Overlay Multiple) and from the Processing Toolbox.
+about=Multiple Overlay Tools runs vector overlay operations on many layers in a single step. Intersection Multiple (points, lines, polygons), Union Multiple (same geometry type), Erase Multiple (one layer erased by several polygon layers) and Clip Multiple (many layers clipped by one polygon). For every input layer you can use selected features only, keep only chosen fields and add a field-name prefix. Invalid geometries can be fixed automatically. Works from the Vector menu (Overlay Multiple) and from the Processing Toolbox, with the standard layer checkboxes and output options (temporary layer, save to file, skip).
 category=Vector
 tags=overlay,intersection,union,erase,difference,clip,multiple,batch,processing
 homepage=https://github.com/triarwadi25/Multiple_Overlay
@@ -18,7 +18,8 @@ deprecated=False
 changelog=1.1.0
     - New: Erase Multiple (difference with several polygon layers)
     - New: Intersection Multiple accepts points, lines and polygons; Union Multiple accepts points, lines or polygons (same type)
-    - New: per-layer selected features only, field selection and prefix
+    - New: per-layer selected features only (checkbox list), field selection and prefix (Configure... button)
+    - New: standard Processing output options (temporary layer, save to file/GeoPackage/database, skip)
     - New: Fix invalid geometries option, QGIS 3.18+ support
     - Fix: Clip Multiple no longer adds layers to the project from inside the algorithm; can write to a folder
     - Improved: layers are copied to memory only when the attribute table must change; custom CRS safe

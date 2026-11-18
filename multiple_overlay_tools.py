@@ -4,21 +4,22 @@ import os
 from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtWidgets import QAction
 from qgis.core import QgsApplication
+from qgis import processing
 
 from .provider import MultipleOverlayProvider
 
 ICON_DIR = os.path.join(os.path.dirname(__file__), "icons")
 
-# (mode, menu text, tooltip, icon)
+# (algorithm name, menu text, tooltip, icon)
 ACTIONS = [
-    ("intersection", "Intersection Multiple",
+    ("intersection_multiple", "Intersection Multiple",
      "Intersect several layers (points, lines, polygons)",
      "intersection.svg"),
-    ("union", "Union Multiple",
+    ("union_multiple", "Union Multiple",
      "Union of several layers of the same geometry type", "union.svg"),
-    ("erase", "Erase Multiple",
+    ("erase_multiple", "Erase Multiple",
      "Erase one layer with several polygon layers", "erase.svg"),
-    ("clip", "Clip Multiple",
+    ("clip_multiple", "Clip Multiple",
      "Clip several layers with one polygon layer", "clip.svg"),
 ]
 
@@ -40,7 +41,7 @@ class MultipleOverlayToolsPlugin:
             "Overlay Multiple",
         )
 
-        for mode, text, tooltip, icon in ACTIONS:
+        for algorithm, text, tooltip, icon in ACTIONS:
             action = QAction(
                 QIcon(os.path.join(ICON_DIR, icon)),
                 text,
@@ -48,17 +49,17 @@ class MultipleOverlayToolsPlugin:
             )
             action.setToolTip(tooltip)
             action.triggered.connect(
-                lambda checked=False, m=mode: self.open_dialog(m))
+                lambda checked=False, a=algorithm: self.run_algorithm(a))
             self.menu.addAction(action)
             self.actions.append(action)
 
-    def open_dialog(self, mode):
-        # Imported lazily so a GUI problem can never block plugin loading.
-        from .dialog import OverlayDialog
-
-        dialog = OverlayDialog(self.iface, mode, self.iface.mainWindow())
-        runner = getattr(dialog, "exec", None) or dialog.exec_
-        runner()
+    def run_algorithm(self, algorithm):
+        try:
+            processing.execAlgorithmDialog(
+                "multiple_overlay_tools:" + algorithm)
+        except Exception as exc:  # noqa: BLE001
+            self.iface.messageBar().pushCritical(
+                "Multiple Overlay Tools", str(exc))
 
     def unload(self):
         if self.menu:
